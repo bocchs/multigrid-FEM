@@ -2,8 +2,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import distmesh as dm
 import numpy.linalg
-from scipy.sparse import csc_matrix
-from scipy.sparse.linalg import spsolve
 import sys
 
 # Gauss-seidel from Wikipedia
@@ -37,8 +35,8 @@ def steepest_descent(A, x0, b, tol=1e-8, maxiter=3):
     return x0
 
 
-# Builds system for -u_xx = 1
-def get_system(m):
+# Builds system for -u_xx = 1, u(0) = u(1) = 0
+def get_system1D_old(m):
     # m interior nodes
     x = np.linspace(0,1,m+2)
     A = np.zeros((m,m))
@@ -54,115 +52,114 @@ def get_system(m):
         b[j-1] = hj / 2 + hj1 / 2
     return A, b, x
 
+# Builds system for -u_xx = 1, u(0) = u(1) = 0
+def get_system1D(m):
+    # m interior nodes
+    h = 1 / (m+1)
+    x = np.linspace(0,1,m+2)
+    A = np.zeros((m,m))
+    b = np.zeros((m,1))
+    diagonals = [m*[2/h], m*[-1/h], m*[-1/h]]
+    A = np.diag(m*[2/h], k=0) + np.diag((m-1)*[-1/h], k=1) + np.diag((m-1)*[-1/h], k=-1)
+    b = h*np.ones((m,1))
+    return A, b, x
 
-def two_grid_step(A, b, x, uh):
+
+def two_grid_step1D(A, b, x, uh):
     # x is domain (0,1)
     # uh is starting solution
     m = len(x) - 2
-    h = x[1] - x[0]
-
+    h = 1 / (m+1)
     uh_smooth = gs(A, uh[1:-1], b) # pre-smoothing
     rh = np.zeros((m+2,1))
     rh[1:-1] = b - A@uh_smooth # compute residual
-
     r2h = rh[::2][1:-1] # restrict by just keeping the coarse node values, keep interior nodes
-
     m2 = len(r2h)
-    A2, b2, x2 = get_system(m2)
-    A2_sparse = csc_matrix(A2)
-    correct_2h = np.zeros((m2+2,))
-    # correct_2h[1:-1] = spsolve(A2_sparse, r2h) # correct on coarse grid
-    correct_2h[1:-1] = np.linalg.solve(A2, r2h).reshape(-1)
-    prolong_h = np.interp(x, x2, correct_2h).reshape(-1,1) # linear interpolation (prolongation)
-    uh += prolong_h
+    A2, b2, x2 = get_system1D(m2)
+    error_2h = np.zeros((m2+2,))
+    error_2h[1:-1] = np.linalg.solve(A2, r2h).reshape(-1) # compute error on coarse grid
+    error_h = np.interp(x, x2, error_2h).reshape(-1,1) # linear interpolation (prolongation)
+    uh += error_h # add correction fine grid
     uh[1:-1] = gs(A, uh[1:-1], b) # post-smoothing
     return uh
 
 # https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.221.2421&rep=rep1&type=pdf
 # pg 48
-def multigrid(level, A, b, x, uh):
-    # x is domain (0,1)
-    # uh is starting solution
+def multigrid1D(level, A_levels, b, x_levels, uh):
+    A = A_levels[level]
+    x = x_levels[level]
     if level == 0:
-        uh[1:-1] = np.linalg.solve(A, b).reshape(-1,1)
+        uh[1:-1] = np.linalg.solve(A, b).reshape(-1,1) # solve error on coarse grid
         return uh
     else:
         m = len(x) - 2
-        h = x[1] - x[0]
         uh_smooth = gs(A, uh[1:-1], b) # pre-smoothing
         rh = np.zeros((m+2,1))
         rh[1:-1] = b - A@uh_smooth # compute residual
-        r2h = rh[::2][1:-1] # restrict by just keeping the coarse node values, keep interior nodes
+        r2h = rh[::2][1:-1] # restrict by just keeping the coarse nodes ([::2]), keep interior nodes ([1:-1])
         m2 = len(r2h)
-        A2, b2, x2 = get_system(m2)
         uh2 = np.zeros((m2+2,1))
-        correct_2h = np.zeros((m2+2,))
-        correct_2h = multigrid(level-1, A2, r2h, x2, uh2).reshape(-1) # correct on coarse grid
-        prolong_h = np.interp(x, x2, correct_2h).reshape(-1,1) # linear interpolation (prolongation)
-        uh += prolong_h
-        return uh
+        error_2h = multigrid1D(level-1, A_levels, r2h, x_levels, uh2).reshape(-1) # compute error on coarse grid
+        x2 = x_levels[level-1]
+        error_h = np.interp(x, x2, error_2h).reshape(-1,1) # linear interpolation (prolongation)
+        uh += error_h # add correction on fine grid
+        uh_smooth = np.zeros((m+2,1))
+        uh_smooth[1:-1] = gs(A, uh[1:-1], b) # post-smoothing
+        return uh_smooth
 
-
-if __name__ == "__main__":
-    val = 8
-    m = 2**val-1 # m interior nodes
-    num_el = m+1
-    A, b, x = get_system(m)
-    A_sparse = csc_matrix(A)
+def main_1D():
+    # -u_xx = 1
+    levels = 7
+    m = 2**levels-1 # m interior nodes
+    h = 1 / (m+1)
+    A, b, x = get_system1D(m)
+    exact_soln = -1/2*x*(x-1)
     uh_direct = np.zeros((m+2,))
-    uh_direct[1:-1] = spsolve(A_sparse, b)
+    # uh_direct[1:-1] = spsolve(A, b)
+    uh_direct[1:-1] = np.linalg.solve(A, b).reshape(-1)
+    direct_err = np.sqrt(h*np.sum((exact_soln-uh_direct)**2))
+    print("direct err = " + str(direct_err))
     plt.plot(x,uh_direct,'-o',label='Direct Solution')
     plt.xlabel('x')
     plt.ylabel('u_h')
-    # plt.show()
-    
-    # multigrid
-    # uh = np.zeros((m,1))
-    # uh_smooth = steepest_descent(A, uh, b)
-    # rh = np.zeros((m+2,1))
-    # rh[1:-1] = b - A@uh_smooth
 
-    # # T_restrict = np.zeros(((m+1)//2+1,m+2))
-    # # r2h = T_restrict @ rh # restrict residual onto coarse grid
-    # # print(r2h)
+    num_iters = 100
 
-    # r2h = rh[::2][1:-1] # restrict by just keeping the coarse node values, keep interior nodes
-    # m2 = len(r2h)
-    # A2, b2, x2 = get_system(m2)
-    # A2_sparse = csc_matrix(A2)
-    # correct_2h = np.zeros((m2,))
-    # correct_2h[1:-1] = spsolve(A2_sparse, r2h) # correct on coarse grid
-    # prolong_h = np.interp(x, x2, correct_2h) # linear interpolation
-    # uh += prolong_h
-
-    num_iters = 1
     uh_two_grid = np.zeros((m+2,1))
     for k in range(num_iters):
-        uh_two_grid = two_grid_step(A, b, x, uh_two_grid)
+        uh_two_grid = two_grid_step1D(A, b, x, uh_two_grid)
     uh_two_grid = uh_two_grid.reshape(-1)
+    two_grid_err = np.sqrt(h*np.sum((exact_soln-uh_two_grid)**2))
+    print("two grid err = " + str(two_grid_err))
     plt.plot(x,uh_two_grid,'-o',label='Two Grid Solution')
 
+    # intialize grids
     uh_multigrid = np.zeros((m+2,1))
-    levels = 1
+    A_levels = []
+    x_levels = []
+    # b = []
+    for level in range(1,levels+1):
+        m = 2**level-1
+        A, b, x = get_system1D(m)
+        A_levels.append(A)
+        x_levels.append(x)
+    # run multigrid
     for k in range(num_iters):
-        uh_multigrid = multigrid(levels, A, b, x, uh_multigrid)
+        uh_multigrid = multigrid1D(levels-1, A_levels, b, x_levels, uh_multigrid)
     uh_multigrid = uh_multigrid.reshape(-1)
+    multigrid_err = np.sqrt(h*np.sum((exact_soln-uh_multigrid)**2))
+    print("multigrid err = " + str(multigrid_err))
     plt.plot(x,uh_multigrid,'-o',label='Multigrid Solution')
 
-    exact_soln = -1/2*x*(x-1)
+    
     plt.plot(x,exact_soln,'-o',label='Exact Solution')
     plt.legend()
     plt.show()
 
-    h = x[1] - x[0]
-    two_grid_err = np.sqrt(h*np.sum((exact_soln-uh_two_grid)**2))
-    print("two grid err = " + str(two_grid_err))
 
-    multigrid_err = np.sqrt(h*np.sum((exact_soln-uh_multigrid)**2))
-    print("multigrid err = " + str(multigrid_err))
 
-    direct_err = np.sqrt(h*np.sum((exact_soln-uh_direct)**2))
-    print("direct err = " + str(direct_err))
+if __name__ == "__main__":
+    main_1D()
 
 
 
