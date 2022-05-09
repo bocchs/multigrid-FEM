@@ -10,7 +10,8 @@ def plot_mesh(p,t):
         plt.plot(p[inds[[0, 1]],0], p[inds[[0,1]],1], '-b')
         plt.plot(p[inds[[0, 2]],0], p[inds[[0,2]],1], '-b')
         plt.plot(p[inds[[1, 2]],0], p[inds[[1,2]],1], '-b')
-    plt.axis('equal')
+    plt.xlim([-.1, 1.1])
+    plt.ylim([-.1, 1.1])
     plt.show()
 
 def plot_mesh_par(p,t,parents):
@@ -29,7 +30,8 @@ def plot_mesh_par(p,t,parents):
                 plt.xlim([0,1])
                 plt.ylim([0,1])
                 plt.show()
-    plt.axis('equal')
+    plt.xlim([0,1])
+    plt.ylim([0,1])
     plt.show()
 
 
@@ -61,6 +63,28 @@ def gs(A, x0, b, tol=1e-8, maxiter=3):
     return x0
 
 
+# returns node numbers (indices) that make up triangle k's neighboring triangles
+def get_neighboring_triangles(t, level_triangles, k):
+    assert(k in level_triangles)
+    neighboring_triangles = np.zeros((0,), int)
+    tri_k_nodes = t[k]
+    triangle_counts = {} # key: triangle ID, value: number of nodes in triangle shared with triangle k
+    for triangle in level_triangles:
+        triangle_counts[triangle] = 0
+    # iterate over each node in triangle k
+    for node in tri_k_nodes:
+        # iterate over each triangle, check if node in triangle
+        for triangle in level_triangles:
+            # check if node is shared between triangle k and current triangle
+            if node in t[triangle] and not triangle == k:
+                triangle_counts[triangle] += 1
+    # threshold number of shared nodes for classifying as neighboring triangle
+    for triangle in level_triangles:
+        if triangle_counts[triangle] >= 1:
+            neighboring_triangles = np.concatenate((neighboring_triangles, np.array([triangle],int)))
+    return neighboring_triangles
+
+
 def create_meshes(levels):
     # m interior nodes
     # p: node positions Nx2
@@ -72,13 +96,13 @@ def create_meshes(levels):
     parents[1] = np.array([[-1,-1]])
     parents[2] = np.array([[-1,-1]])
     parents[3] = np.array([[-1,-1]])
-    # dictionary of triangle indices in p corresponding to a level
+    # dictionary of triangle indices in t corresponding to a level
     # level_triangles[0] corresponds to coarsest grid
     level_triangles = {}
     level_triangles[0] = np.array([0,1], int)
     level_nodes = {} # dictionary of nodes that were added for a level
     level_nodes[0] = np.array([0,1,2,3], int)
-    num_nodes_up_to_level = {}
+    num_nodes_up_to_level = {} # total number of nodes in a level
     num_nodes_up_to_level[0] = 4
     t_count = 2
     for lev in range(1, levels+1):
@@ -112,16 +136,6 @@ def create_meshes(levels):
                 level_nodes[lev] = np.concatenate((level_nodes[lev], np.array([new_node0])),axis=0)
                 par0 = np.array([node0, node1])
                 parents[new_node0] = par0
-            # par0 = np.array([[node0, node1]])
-            # if new_node0 not in parents:
-            #     parents[new_node0] = par0
-            # else:
-            #     parents[new_node0] = np.concatenate((parents[new_node0], par0), axis=0)
-            # print("new_node0 = " + str(new_node0))
-            # print("AAAA")
-            # print(parents)
-            # print(parents[new_node0])
-            # print("BBBB")
 
             dists1 = np.linalg.norm(new_p1 - p, axis=1)
             closeness1 = np.isclose(dists1,0)
@@ -134,11 +148,6 @@ def create_meshes(levels):
                 level_nodes[lev] = np.concatenate((level_nodes[lev], np.array([new_node1])),axis=0)
                 par1 = np.array([node1, node2])
                 parents[new_node1] = par1
-            # par1 = np.array([[node1, node2]])
-            # if new_node1 not in parents:
-            #     parents[new_node1] = par1
-            # else:
-            #     parents[new_node1] = np.concatenate((parents[new_node1], par1), axis=0)
 
             dists2 = np.linalg.norm(new_p2 - p, axis=1)
             closeness2 = np.isclose(dists2,0)
@@ -151,11 +160,6 @@ def create_meshes(levels):
                 level_nodes[lev] = np.concatenate((level_nodes[lev], np.array([new_node2])),axis=0)
                 par2 = np.array([node0, node2])
                 parents[new_node2] = par2
-            # par2 = np.array([[node0, node2]])
-            # if new_node2 not in parents:
-            #     parents[new_node2] = par2
-            # else:
-            #     parents[new_node2] = np.concatenate((parents[new_node2], par2), axis=0)
 
             new_triangle0 = np.array([[node0, new_node0, new_node2]])
             new_triangle1 = np.array([[new_node0, node1, new_node1]])
@@ -238,9 +242,9 @@ def multigrid2D(level, A_levels, b, uh, parents, level_nodes, num_nodes_up_to_le
         return uh_smooth
 
 
-def main_2D():
-    num_iters = 100
-    levels = 4
+def run_multigrid_2D_experiments():
+    num_iters = 1000
+    levels = 6
     p, t, level_triangles, level_nodes, num_nodes_up_to_level, parents = create_meshes(levels)
     t_level = t[level_triangles[levels]]
 
@@ -258,21 +262,58 @@ def main_2D():
     # run multigrid
     for k in range(num_iters):
         uh_multigrid = multigrid2D(levels-1, A_levels, b, uh_multigrid, parents, level_nodes, num_nodes_up_to_level)
-        # uh_multigrid = uh_multigrid.reshape(-1)
-
         title = 'temp'
         filename = 'temp.png'
         plot_solution(title, filename, p, t_level, uh_multigrid.reshape(-1), ax)
     plt.show()
 
+
     direct_u = np.linalg.solve(A, b)
     title = 'Direct Solution'
     filename = 'exact.png'
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
     plot_solution(title, filename, p, t_level, direct_u, ax)
     plt.show()
 
-if __name__ == "__main__":
-    main_2D()
 
+def run_adaptive_2D_experiments():
+    levels = 4
+    p, t, level_triangles, level_nodes, num_nodes_up_to_level, parents = create_meshes(levels)
+    t_level = t[level_triangles[levels]]
+
+    print(level_triangles[levels])
+    for triangle in level_triangles[levels]:
+        x0, y0 = p[t[triangle][0]]
+        x1, y1 = p[t[triangle][1]]
+        x2, y2 = p[t[triangle][2]]
+
+        x_center = (x0 + x1 + x2) / 3
+        y_center = (y0 + y1 + y2) / 3
+        u_center = np.mean(u[t[triangle]])
+        print(u_center)
+        
+        
+        nei_tri = get_neighboring_triangles(t, level_triangles[levels], triangle)
+        for tri in nei_tri:
+            x0, y0 = p[t[tri][0]]
+            x1, y1 = p[t[tri][1]]
+            x2, y2 = p[t[tri][2]]
+            x_center_nei = (x0 + x1 + x2) / 3
+            y_center_nei = (y0 + y1 + y2) / 3
+            u_center_nei = np.mean(u[t[tri]])
+
+            
+
+            
+    # plot_mesh(p,t[nei_tri])
+    # plot_mesh(p,t[[triangle]])
+
+    
+
+
+if __name__ == "__main__":
+    # run_multigrid_2D_experiments()
+    run_adaptive_2D_experiments()
 
 
