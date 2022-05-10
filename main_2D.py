@@ -282,21 +282,29 @@ def run_multigrid_2D_experiments():
     plt.show()
 
 
-def run_adaptive_2D_experiments():
-    levels = 3
-    p, t, level_triangles, level_nodes, num_nodes_up_to_level, parents = create_meshes(levels)
+def adaptive_step(levels, p, t, level_triangles, level_nodes, num_nodes_up_to_level):
+    # print(level_triangles[levels])
+    # print(t.shape)
+    # print("t before = " + str(t.shape[0]))
     t_level = t[level_triangles[levels]]
+
+    A, b = build_system(p, t_level, levels, num_nodes_up_to_level)
+    A_sparse = csc_matrix(A)
+    u = spsolve(A_sparse, b)
 
     # intialize starting grid level
     t_count = 0
     for i in range(levels+1):
         t_count += len(level_triangles[i])
+    t_count = np.max(level_triangles[levels])
     delta = 1.5
     num_triangles_level = len(level_triangles[levels])
     bisect_thresh = delta**2 / num_triangles_level
 
     triangles_to_bisect = np.zeros((0,), int)
     level_triangles[levels+1] = level_triangles[levels]
+    # t = np.concatenate((t, t[level_triangles[levels]]), axis=0)
+
     level_nodes[levels+1] = np.zeros((0,), int)
 
     for triangle in level_triangles[levels]:
@@ -323,13 +331,15 @@ def run_adaptive_2D_experiments():
             y_center_nei1 = (y0 + y1 + y2) / 3
             u_center_nei1 = np.mean(u[t[tri1]])
             hx = x_center_nei1 - x_center
-            ux = (u_center_nei1 - u_center) / hx
-            if np.abs(ux) > max_ux:
-                max_ux = np.abs(ux)
+            if hx != 0:
+                ux = (u_center_nei1 - u_center) / hx
+                if np.abs(ux) > max_ux:
+                    max_ux = np.abs(ux)
             hy = y_center_nei1 - y_center
-            uy = (u_center_nei1 - u_center) / hy
-            if np.abs(uy) > max_uy:
-                max_uy = np.abs(uy)
+            if hy != 0:
+                uy = (u_center_nei1 - u_center) / hy
+                if np.abs(uy) > max_uy:
+                    max_uy = np.abs(uy)
 
             for tri2 in nei_tri:
                 if tri2 == tri1:
@@ -422,15 +432,31 @@ def run_adaptive_2D_experiments():
     # remove bisected triangles
     for k in triangles_to_bisect:
         level_triangles[levels+1] = level_triangles[levels+1][level_triangles[levels+1] != k]
+    # print("num bisected = " + str(len(triangles_to_bisect)))
 
     num_nodes_up_to_level[levels+1] = num_nodes_up_to_level[levels] + level_nodes[levels+1].shape[0] 
 
+    # print("t after = " + str(t.shape[0]))
+    return p, t, level_triangles, level_nodes, num_nodes_up_to_level
 
-    plot_mesh(p,t[level_triangles[levels+1]])
-    A, b = build_system(p, t[level_triangles[levels+1]], levels+1, num_nodes_up_to_level)
+
+def run_adaptive_2D_experiments():
+    start_level = 2
+    p, t, level_triangles, level_nodes, num_nodes_up_to_level, parents = create_meshes(start_level)
+    t_level = t[level_triangles[start_level]]
+
+    num_iters = 2
+    end_level = start_level + num_iters
+    for lev in range(start_level, end_level):
+        p, t, level_triangles, level_nodes, num_nodes_up_to_level = \
+                    adaptive_step(lev, p, t, level_triangles, level_nodes, num_nodes_up_to_level)
+
+
+    plot_mesh(p,t[level_triangles[end_level]])
+    A, b = build_system(p, t[level_triangles[end_level]], end_level, num_nodes_up_to_level)
     A_sparse = csc_matrix(A)
     u = spsolve(A_sparse, b)
-    plot_solution('', 'a', p, t[level_triangles[levels+1]], u)
+    plot_solution('', 'a', p, t[level_triangles[end_level]], u)
     plt.show()
 
 
