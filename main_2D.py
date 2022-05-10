@@ -2,14 +2,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import distmesh as dm
 import numpy.linalg
+from scipy.sparse import csc_matrix
+from scipy.sparse.linalg import spsolve
 import sys
 
 def plot_mesh(p,t):
     for inds in t:
-        plt.scatter(p[inds,0], p[inds,1], c='b')
         plt.plot(p[inds[[0, 1]],0], p[inds[[0,1]],1], '-b')
         plt.plot(p[inds[[0, 2]],0], p[inds[[0,2]],1], '-b')
         plt.plot(p[inds[[1, 2]],0], p[inds[[1,2]],1], '-b')
+    plt.scatter(p[t,0], p[t,1], c='b')
     plt.xlim([-.1, 1.1])
     plt.ylim([-.1, 1.1])
     plt.show()
@@ -35,17 +37,17 @@ def plot_mesh_par(p,t,parents):
     plt.show()
 
 
-def plot_solution(title, filename, p, t, u, ax):
-    ax.clear()
+def plot_solution(title, filename, p, t, u):
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
     ax.plot_trisurf(p[:,0], p[:,1], u, triangles=t, cmap=plt.cm.viridis)
-    plt.xlim([0,1])
-    plt.ylim([0,1])
-    ax.set_zlim(0,.08)
+    # plt.xlim([0,1])
+    # plt.ylim([0,1])
+    # ax.set_zlim(0,.08)
     plt.xlabel('x')
     plt.ylabel('y')
     plt.title(title)
-    plt.pause(.0001)
-    # plt.show()
+    plt.show()
     # plt.savefig(filename)
 
 # Gauss-seidel from Wikipedia
@@ -76,11 +78,11 @@ def get_neighboring_triangles(t, level_triangles, k):
         # iterate over each triangle, check if node in triangle
         for triangle in level_triangles:
             # check if node is shared between triangle k and current triangle
-            if node in t[triangle] and not triangle == k:
+            if node in t[triangle] and not (triangle == k):
                 triangle_counts[triangle] += 1
     # threshold number of shared nodes for classifying as neighboring triangle
     for triangle in level_triangles:
-        if triangle_counts[triangle] >= 1:
+        if triangle_counts[triangle] >= 2:
             neighboring_triangles = np.concatenate((neighboring_triangles, np.array([triangle],int)))
     return neighboring_triangles
 
@@ -185,6 +187,9 @@ def build_system(p, t, level, num_nodes_up_to_level):
 
     e = dm.boundedges(p,t)
     boundary_inds = np.unique(e) # indices of boundary nodes
+    for ind in boundary_inds:
+        if 0 not in p[ind] and 1 not in p[ind]:
+            boundary_inds = boundary_inds[boundary_inds != ind]
     nv = N - len(boundary_inds)
 
     A = np.zeros((N, N))
@@ -278,38 +283,155 @@ def run_multigrid_2D_experiments():
 
 
 def run_adaptive_2D_experiments():
-    levels = 4
+    levels = 3
     p, t, level_triangles, level_nodes, num_nodes_up_to_level, parents = create_meshes(levels)
     t_level = t[level_triangles[levels]]
 
-    print(level_triangles[levels])
+    # intialize starting grid level
+    t_count = 0
+    for i in range(levels+1):
+        t_count += len(level_triangles[i])
+    delta = 1.5
+    num_triangles_level = len(level_triangles[levels])
+    bisect_thresh = delta**2 / num_triangles_level
+
+    triangles_to_bisect = np.zeros((0,), int)
+    level_triangles[levels+1] = level_triangles[levels]
+    level_nodes[levels+1] = np.zeros((0,), int)
+
     for triangle in level_triangles[levels]:
         x0, y0 = p[t[triangle][0]]
         x1, y1 = p[t[triangle][1]]
         x2, y2 = p[t[triangle][2]]
 
+        # use average of three nodes as value in center of triangle
         x_center = (x0 + x1 + x2) / 3
         y_center = (y0 + y1 + y2) / 3
         u_center = np.mean(u[t[triangle]])
-        print(u_center)
-        
         
         nei_tri = get_neighboring_triangles(t, level_triangles[levels], triangle)
-        for tri in nei_tri:
-            x0, y0 = p[t[tri][0]]
-            x1, y1 = p[t[tri][1]]
-            x2, y2 = p[t[tri][2]]
-            x_center_nei = (x0 + x1 + x2) / 3
-            y_center_nei = (y0 + y1 + y2) / 3
-            u_center_nei = np.mean(u[t[tri]])
+        max_ux = 0
+        max_uy = 0
+        max_uxx = 0
+        max_uyy = 0
 
-            
+        for tri1 in nei_tri:
+            x0, y0 = p[t[tri1][0]]
+            x1, y1 = p[t[tri1][1]]
+            x2, y2 = p[t[tri1][2]]
+            x_center_nei1 = (x0 + x1 + x2) / 3
+            y_center_nei1 = (y0 + y1 + y2) / 3
+            u_center_nei1 = np.mean(u[t[tri1]])
+            hx = x_center_nei1 - x_center
+            ux = (u_center_nei1 - u_center) / hx
+            if np.abs(ux) > max_ux:
+                max_ux = np.abs(ux)
+            hy = y_center_nei1 - y_center
+            uy = (u_center_nei1 - u_center) / hy
+            if np.abs(uy) > max_uy:
+                max_uy = np.abs(uy)
 
-            
-    # plot_mesh(p,t[nei_tri])
-    # plot_mesh(p,t[[triangle]])
+            for tri2 in nei_tri:
+                if tri2 == tri1:
+                    continue
+                x0, y0 = p[t[tri2][0]]
+                x1, y1 = p[t[tri2][1]]
+                x2, y2 = p[t[tri2][2]]
+                x_center_nei2 = (x0 + x1 + x2) / 3
+                y_center_nei2 = (y0 + y1 + y2) / 3
+                u_center_nei2 = np.mean(u[t[tri1]])
+                # print("neighbor2 (x,y) = (" + str(x_center_nei2) + ", " + str(y_center_nei2) + ")")
+                hx2 = x_center_nei2 - x_center_nei1
+                if hx2 != 0:
+                    uxx = (u_center_nei1 - 2*u_center + u_center_nei2) / hx2
+                    if np.abs(uxx) > max_uxx:
+                        max_uxx = np.abs(uxx)
+                hy2 = y_center_nei2 - y_center_nei1
+                if hy2 != 0:
+                    uyy = (u_center_nei1 - 2*u_center + u_center_nei2) / hy2
+                    if np.abs(uyy) > max_uyy:
+                        max_uyy = np.abs(uyy)
+        H2_norm = np.sqrt(np.abs(u_center) + max_ux + max_uy + max_uxx + max_uyy)
+        side1_len = np.linalg.norm([x1-x0, y1-y0])
+        side2_len = np.linalg.norm([x2-x0, y2-y0])
+        side3_len = np.linalg.norm([x2-x1, y2-y1])
+        hk = np.max([side1_len, side2_len, side3_len])
+        val = (hk * H2_norm)**2
+        # print("val = " + str(val))
+        # print("thresh = " + str(bisect_thresh))
+        if val > bisect_thresh:
+            triangles_to_bisect = np.concatenate((triangles_to_bisect, np.array([triangle], int)))
 
-    
+
+    for k in triangles_to_bisect:
+        tri_inds = t[k] # get triangle node inds
+        node0 = tri_inds[0]
+        node1 = tri_inds[1]
+        node2 = tri_inds[2]
+        p0 = p[node0] # curr triangle nodes
+        p1 = p[node1]
+        p2 = p[node2]
+        # bisect triangle
+        new_p0 = ((p1 + p0) / 2).reshape(1,2)
+        new_p1 = ((p2 + p1) / 2).reshape(1,2)
+        new_p2 = ((p2 + p0) / 2).reshape(1,2)
+
+        # check if node already exists (from bisecting other triangle)
+        dists0 = np.linalg.norm(new_p0 - p, axis=1)
+        closeness0 = np.isclose(dists0,0)
+        assert(closeness0.sum() <= 1)
+        if np.any(closeness0):
+            # node already exists, use it
+            new_node0 = np.argmin(dists0)
+        else:
+            # node does not already exist, so add it
+            p = np.concatenate((p, new_p0), axis=0)
+            new_node0 = p.shape[0]-1
+            level_nodes[levels+1] = np.concatenate((level_nodes[levels+1], np.array([new_node0])),axis=0)
+
+        dists1 = np.linalg.norm(new_p1 - p, axis=1)
+        closeness1 = np.isclose(dists1,0)
+        assert(closeness1.sum() <= 1)
+        if np.any(closeness1):
+            new_node1 = np.argmin(dists1)
+        else:
+            p = np.concatenate((p, new_p1), axis=0)
+            new_node1 = p.shape[0]-1
+            level_nodes[levels+1] = np.concatenate((level_nodes[levels+1], np.array([new_node1])),axis=0)
+
+        dists2 = np.linalg.norm(new_p2 - p, axis=1)
+        closeness2 = np.isclose(dists2,0)
+        assert(closeness2.sum() <= 1)
+        if np.any(closeness2):
+            new_node2 = np.argmin(dists2)
+        else:
+            p = np.concatenate((p, new_p2), axis=0)
+            new_node2 = p.shape[0]-1
+            level_nodes[levels+1] = np.concatenate((level_nodes[levels+1], np.array([new_node2])),axis=0)
+
+        new_triangle0 = np.array([[node0, new_node0, new_node2]])
+        new_triangle1 = np.array([[new_node0, node1, new_node1]])
+        new_triangle2 = np.array([[new_node0, new_node1, new_node2]])
+        new_triangle3 = np.array([[new_node2, new_node1, node2]])
+        t = np.concatenate((t,new_triangle0,new_triangle1,new_triangle2,new_triangle3), axis=0)
+
+        level_triangles[levels+1] = np.concatenate((level_triangles[levels+1], 
+                        np.array([t_count,t_count+1,t_count+2,t_count+3], int)), axis=0)
+        t_count += 4
+
+    # remove bisected triangles
+    for k in triangles_to_bisect:
+        level_triangles[levels+1] = level_triangles[levels+1][level_triangles[levels+1] != k]
+
+    num_nodes_up_to_level[levels+1] = num_nodes_up_to_level[levels] + level_nodes[levels+1].shape[0] 
+
+
+    plot_mesh(p,t[level_triangles[levels+1]])
+    A, b = build_system(p, t[level_triangles[levels+1]], levels+1, num_nodes_up_to_level)
+    A_sparse = csc_matrix(A)
+    u = spsolve(A_sparse, b)
+    plot_solution('', 'a', p, t[level_triangles[levels+1]], u)
+    plt.show()
 
 
 if __name__ == "__main__":
