@@ -52,6 +52,45 @@ def get_system1D_old(m):
         b[j-1] = hj / 2 + hj1 / 2
     return A, b, x
 
+
+# Builds system for -u_xx = c*cos(ax)
+def get_system1D_uneven_rhs_cos(x, a, c):
+    # x[0] = x[m+1] = 0
+    # m interior nodes
+    m = len(x) - 2
+    A = np.zeros((m,m))
+    b = np.zeros((m,1))
+    for j in range(1, m+1):
+        hj = x[j] - x[j-1]
+        hj1 = x[j+1] - x[j]
+        A[j-1,j-1] = 1/hj + 1/hj1
+        if j < m:
+            A[j-1,j] = -1/hj1
+        if j > 1:
+            A[j-1,j-2] = -1/hj
+        b[j-1] = rhs(x[j-1], x[j], x[j+1], a, c)
+    return A, b
+
+
+# Builds system for -u_xx = 1, u(0) = u(1) = 0
+def get_system1D_uneven(x):
+    # x[0] = x[m+1] = 0
+    # m interior nodes
+    m = len(x) - 2
+    A = np.zeros((m,m))
+    b = np.zeros((m,1))
+    for j in range(1, m+1):
+        hj = x[j] - x[j-1]
+        hj1 = x[j+1] - x[j]
+        A[j-1,j-1] = 1/hj + 1/hj1
+        if j < m:
+            A[j-1,j] = -1/hj1
+        if j > 1:
+            A[j-1,j-2] = -1/hj
+        b[j-1] = hj / 2 + hj1 / 2
+    return A, b
+
+
 # Builds system for -u_xx = 1, u(0) = u(1) = 0
 def get_system1D(m):
     # m interior nodes
@@ -107,7 +146,7 @@ def multigrid1D(level, A_levels, b, x_levels, uh):
         uh_smooth[1:-1] = gs(A, uh[1:-1], b) # post-smoothing
         return uh_smooth
 
-def main_1D():
+def run_multigrid_1D_experiments():
     # -u_xx = 1
     levels = 7
     m = 2**levels-1 # m interior nodes
@@ -156,32 +195,123 @@ def main_1D():
     plt.legend()
     plt.show()
 
+# f = c*cos(ax)
+def rhs(xj_1, xj, xj1, a, c):
+    hj = xj - xj_1
+    hj1 = xj1 - xj
+    term1 = 1/hj * (1/a*xj*np.sin(a*xj) + 1/a**2 * np.cos(a*xj) - (1/a*xj_1*np.sin(a*xj_1) + 1/a**2 * np.cos(a*xj_1)))
+    term2 = -xj_1 / hj * (1/a * np.sin(a*xj) - (1/a * np.sin(a*xj_1)))
+    term3 = 1 / hj1 * (1/a * xj1 * np.sin(a*xj1) + 1/a**2*np.cos(a*xj1) - (1/a * xj * np.sin(a*xj) + 1/a**2*np.cos(a*xj)))
+    term4 = -xj / hj1 * (1/a * np.sin(a*xj1) - (1/a*np.sin(a*xj)))
+    return c*(term1 + term2 + term3 + term4)
 
 
-if __name__ == "__main__":
-    main_1D()
+def adaptive_step(x, u):
+    m = len(x) - 2
+    delta = 2
+    bisect_thresh = delta**2 / len(x)
+    x_new = []
+    x_new.append(x[0])
+    x_new.append(x[1])
+    for i in range(2, m):
+        ux_back = (u[i] - u[i-1]) / (x[i] - x[i-1])
+        ux_for = (u[i+1] - u[i]) / (x[i+1] - x[i])
+        uxx = (ux_for - ux_back) / (x[i+1] - x[i-1])
+        h2_norm = np.sqrt(np.abs(u[i]) + np.abs(ux_for) + np.abs(uxx))
+        print(h2_norm)
+        print(bisect_thresh)
+        if h2_norm > bisect_thresh:
+            x_new.append((x[i] + x[i-1]) / 2)
+            x_new.append(x[i])
+            x_new.append((x[i+1] + x[i]) / 2)
+            # might have duplicate x_new's, handle by calling np.unique()
+        else:
+            x_new.append(x[i])
+    x_new.append(x[-2])
+    x_new.append(x[-1])
+    x_new = np.array(x_new)
+    x_new = np.unique(x_new)
+
+    # A_new, b_new = get_system1D_uneven(x_new)
+    A_new, b_new = get_system1D_uneven_rhs_cos(x_new, 1, 1)
+    m_new = len(x_new) - 2
+    u_new = np.zeros((m_new+2,))
+    u_new[1:-1] = np.linalg.solve(A_new, b_new).reshape(-1)
+
+    return x_new, u_new
 
 
+
+def adaptive():
+    num_iters = 0
+    levels = 4
+    m = 2**levels-1 # m interior nodes
+    h = 1 / (m+1)
+    A, b, x = get_system1D(m)
+    exact_soln = -1/2*x*(x-1)
+
+
+    x = np.linspace(0,1,m+2)    
+    a = 10*np.pi
+    c = a**2
+    A, b = get_system1D_uneven_rhs_cos(x, a, c)
+    exact_soln = -c / a**2 * np.cos(a*x)
+
+
+    u = np.zeros((m+2,))
+    u[1:-1] = np.linalg.solve(A, b).reshape(-1)
+    plt.plot(x, u, '^g',label='Base Grid')
+
+    for i in range(num_iters):
+        print(i)
+        x, u = adaptive_step(x, u)
+    plt.plot(x, u, 'vr',label='Adapted Grid')
+    plt.legend()
+    plt.show()
 
     sys.exit()
 
-    # fd = lambda p: np.sqrt((p**2).sum(1))-1.0
-    fd = lambda p: dm.drectangle0(p,0,1,0,1)
-    # fh = lambda p: 0.00+1*dm.dcircle(p,0,0,0.5)
-    fh = dm.huniform
-    nodes = np.array([[0, 0], [1, 0], [0, 1], [1, 1]])
-    # p: node positions Nx2
-    # t: triangle indices nKx3
-    p, t = dm.distmesh2d(fd, fh, .3, (0,0,1,1), pfix=nodes)
-    p, t = dm.uniref(p, t)
-    plt.figure()
-    for inds in t:
-        plt.scatter(p[inds,0], p[inds,1], c='b')
-        plt.plot(p[inds,0], p[inds,1], '-b')
-    plt.axis('equal')
-    plt.title('2.a. Mesh')
-    print(t[0])
-    print(p[16])
-    print(p[2])
-    print(p[15])
+    # uh_direct[1:-1] = spsolve(A, b)
+    u[1:-1] = np.linalg.solve(A, b).reshape(-1)
+    direct_err = np.sqrt(h*np.sum((exact_soln-u)**2))
+
+    delta = 1
+    bisect_thresh = delta**2 / len(x)
+
+    x_new = []
+    x_new.append(x[0])
+    x_new.append(x[1])
+    for i in range(2, m):
+        ux_back = (u[i] - u[i-1]) / (x[i] - x[i-1])
+        ux_for = (u[i+1] - u[i]) / (x[i+1] - x[i])
+        uxx = (ux_for - ux_back) / (x[i+1] - x[i-1])
+        h2_norm = np.sqrt(np.abs(u[i]) + np.abs(ux_for) + np.abs(uxx))
+        # print(h2_norm)
+        # print(bisect_thresh)
+        if h2_norm > bisect_thresh:
+            x_new.append((x[i] + x[i-1]) / 2)
+            x_new.append(x[i])
+            x_new.append((x[i+1] + x[i]) / 2)
+            # might have duplicate x_new's, handle by calling np.unique()
+        else:
+            x_new.append(x[i])
+    x_new.append(x[-2])
+    x_new.append(x[-1])
+    x_new = np.array(x_new)
+    x_new = np.unique(x_new)
+
+    A_new, b_new = get_system1D_uneven(x_new)
+
+    m_new = len(x_new) - 2
+    u_new = np.zeros((m_new+2,))
+    u_new[1:-1] = np.linalg.solve(A_new, b_new).reshape(-1)
+
+    plt.plot(x_new, u_new, 'vr',label='Adapted Grid')
+    plt.plot(x, u, '^g',label='Base Grid')
+    plt.legend()
     plt.show()
+
+
+if __name__ == "__main__":
+    # run_multigrid_1D_experiments()
+    adaptive()
