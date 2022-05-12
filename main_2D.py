@@ -248,7 +248,7 @@ def multigrid2D(level, A_levels, b, uh, parents, level_nodes, num_nodes_up_to_le
 
 
 def run_multigrid_2D_experiments():
-    num_iters = 1000
+    num_iters = 10
     levels = 6
     p, t, level_triangles, level_nodes, num_nodes_up_to_level, parents = create_meshes(levels)
     t_level = t[level_triangles[levels]]
@@ -269,7 +269,7 @@ def run_multigrid_2D_experiments():
         uh_multigrid = multigrid2D(levels-1, A_levels, b, uh_multigrid, parents, level_nodes, num_nodes_up_to_level)
         title = 'temp'
         filename = 'temp.png'
-        plot_solution(title, filename, p, t_level, uh_multigrid.reshape(-1), ax)
+    plot_solution(title, filename, p, t_level, uh_multigrid.reshape(-1))
     plt.show()
 
 
@@ -278,7 +278,7 @@ def run_multigrid_2D_experiments():
     filename = 'exact.png'
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
-    plot_solution(title, filename, p, t_level, direct_u, ax)
+    plot_solution(title, filename, p, t_level, direct_u)
     plt.show()
 
 
@@ -461,7 +461,7 @@ def run_adaptive_2D_experiments():
 
 
 if __name__ == "__main__":
-    # run_multigrid_2D_experiments()
-    run_adaptive_2D_experiments()
+    run_multigrid_2D_experiments()
+    # run_adaptive_2D_experiments()
 
 
