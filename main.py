@@ -110,7 +110,7 @@ def two_grid_step1D(A, b, x, uh):
 def multigrid1D(level, A_levels, b, x_levels, uh):
     A = A_levels[level]
     x = x_levels[level]
-    if level == 0:
+    if level == 1:
         uh[1:-1] = np.linalg.solve(A, b).reshape(-1,1) # solve error on coarse grid
         return uh
     else:
@@ -134,8 +134,9 @@ def run_multigrid_1D_experiments():
     # ----------------  -u_xx = 1  ----------------
     # u(0) = u(1) = 0
 
-    num_iters = 100
-    levels = 6
+    
+    num_iters = 500
+    levels = 7
     m = 2**levels-1 # m interior nodes
     h = 1 / (m+1)
 
@@ -156,7 +157,7 @@ def run_multigrid_1D_experiments():
         uh_two_grid = two_grid_step1D(A, b, x, uh_two_grid)
     uh_two_grid = uh_two_grid.reshape(-1)
     two_grid_err = np.sqrt(h*np.sum((exact_soln-uh_two_grid)**2))
-    # print("two grid err = " + str(two_grid_err))
+    print("two grid err = " + str(two_grid_err))
     # plt.plot(x,uh_two_grid,'-o',label='Two Grid Solution')
 
     # intialize grids
@@ -170,25 +171,28 @@ def run_multigrid_1D_experiments():
         A_levels.append(A)
         x_levels.append(x)
     # run multigrid
-    for k in range(num_iters):
+    for k in range(1,num_iters+1):
         uh_multigrid = multigrid1D(levels-1, A_levels, b, x_levels, uh_multigrid)
-    uh_multigrid = uh_multigrid.reshape(-1)
-    multigrid_err = np.sqrt(h*np.sum((exact_soln-uh_multigrid)**2))
-    print("multigrid err = " + str(multigrid_err))
+        if k % 50 == 0:
+            uh_multigrid_temp = uh_multigrid.reshape(-1)
+            multigrid_err = np.sqrt(h*np.sum((exact_soln-uh_multigrid_temp)**2))
+            print("Iteration " + str(k) + ": multigrid err = " + str(multigrid_err))
     plt.plot(x,uh_multigrid,'-vr',label='Multigrid Solution')
     
     
     plt.legend()
-    plt.title('-u_xx = 1')
+    plt.title('-u_xx = 1 :: ' + str(levels) + ' levels :: ' + str(num_iters) + ' iterations')
     plt.show()
+
+    
 
 
     # ----------------  -u_xx = c*cos(a*x)  ----------------
     # u(0) = u(1) = 0
     # a = multiple of 2*pi
 
-    num_iters = 1000
-    levels = 8
+    num_iters = 500
+    levels = 7
     m = 2**levels-1 # m interior nodes
     h = 1 / (m+1)
 
@@ -211,15 +215,16 @@ def run_multigrid_1D_experiments():
         A_levels.append(A)
         x_levels.append(x)
     # run multigrid
-    for k in range(num_iters):
+    for k in range(1, num_iters+1):
         uh_multigrid = multigrid1D(levels-1, A_levels, b, x_levels, uh_multigrid)
-    uh_multigrid = uh_multigrid.reshape(-1)
-    multigrid_err = np.sqrt(h*np.sum((exact_soln-uh_multigrid)**2))
+        if k % 50 == 0:
+            uh_multigrid_temp = uh_multigrid.reshape(-1)
+            multigrid_err = np.sqrt(h*np.sum((exact_soln-uh_multigrid_temp)**2))
+            print("Iteration " + str(k) + ": multigrid err = " + str(multigrid_err))
 
-    print("multigrid err = " + str(multigrid_err))
     plt.plot(x,uh_multigrid,'-vr',label='Multigrid Solution')
     plt.legend()
-    plt.title('-u_xx = cos(10*pi*x)')
+    plt.title('-u_xx = cos(10*pi*x) :: ' + str(levels) + ' levels :: ' + str(num_iters) + ' iterations')
     plt.xlabel('x')
     plt.ylabel('u')
     plt.show()
@@ -286,7 +291,6 @@ def adaptive_step(x, u, a, c):
 
 
 def run_adaptive_1D_experiments():
-    num_iters = 1
     levels = 7
     m = 2**levels-1 # m interior nodes
     h = 1 / (m+1)
@@ -297,8 +301,8 @@ def run_adaptive_1D_experiments():
     # ----------------  -u_xx = c*cos(a*x)  ----------------
     # u(0) = u(1) = 0
     # a = multiple of 2*pi
-    x = np.linspace(0,1,m+2)    
-    a = 10*np.pi #10*np.pi
+    x = np.linspace(0,1,m+2)  
+    a = 10*np.pi
     c = 1
     A, b = get_system1D_uneven_rhs_cos(x, a, c)
     exact_soln = c / a**2 * np.cos(a*x) - c / a**2 * np.cos(a)
@@ -323,7 +327,7 @@ def run_adaptive_1D_experiments():
         val += h*(u[i] - exact_soln[i])**2
     err = np.sqrt(val)
     print("adaptive err = " + str(err))
-
+    print("grid size = " + str(x.shape))
 
     plt.legend()
     plt.title('-u_xx = cos(10*pi*x)')

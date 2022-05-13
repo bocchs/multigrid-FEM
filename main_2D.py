@@ -14,6 +14,9 @@ def plot_mesh(p,t):
     plt.scatter(p[t,0], p[t,1], c='b')
     plt.xlim([-.1, 1.1])
     plt.ylim([-.1, 1.1])
+    plt.xlabel('x')
+    plt.ylabel('y')
+    # plt.title('Ending Mesh')
     plt.show()
 
 def plot_mesh_par(p,t,parents):
@@ -227,7 +230,7 @@ def multigrid2D(level, A_levels, b, uh, parents, level_nodes, num_nodes_up_to_le
     A = A_levels[level]
     num_nodes_in_level = num_nodes_up_to_level[level] #len(level_nodes[level])
     coarser_level_end_node = num_nodes_up_to_level[level]
-    if level == 0:
+    if level == 1:
         uh = np.linalg.solve(A, b).reshape(-1,1) # solve error on coarse grid
         return uh
     else:
@@ -248,10 +251,12 @@ def multigrid2D(level, A_levels, b, uh, parents, level_nodes, num_nodes_up_to_le
 
 
 def run_multigrid_2D_experiments():
-    num_iters = 10
-    levels = 6
+    num_iters = 100
+    levels = 3
     p, t, level_triangles, level_nodes, num_nodes_up_to_level, parents = create_meshes(levels)
     t_level = t[level_triangles[levels]]
+
+    plot_mesh(p,t_level)
 
     uh_multigrid = np.zeros((p.shape[0],1))
     A_levels = []
@@ -267,19 +272,17 @@ def run_multigrid_2D_experiments():
     # run multigrid
     for k in range(num_iters):
         uh_multigrid = multigrid2D(levels-1, A_levels, b, uh_multigrid, parents, level_nodes, num_nodes_up_to_level)
-        title = 'temp'
-        filename = 'temp.png'
+    title = '-(u_xx + u_yy) = 1 :: ' + str(levels) + ' levels :: ' + str(num_iters) + ' iterations'
+    filename = 'temp.png'
     plot_solution(title, filename, p, t_level, uh_multigrid.reshape(-1))
-    plt.show()
 
 
-    direct_u = np.linalg.solve(A, b)
-    title = 'Direct Solution'
-    filename = 'exact.png'
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    plot_solution(title, filename, p, t_level, direct_u)
-    plt.show()
+    # direct_u = np.linalg.solve(A, b)
+    # title = 'Direct Solution'
+    # filename = 'exact.png'
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111, projection='3d')
+    # plot_solution(title, filename, p, t_level, direct_u)
 
 
 def adaptive_step(levels, p, t, level_triangles, level_nodes, num_nodes_up_to_level):
@@ -456,12 +459,13 @@ def run_adaptive_2D_experiments():
     A, b = build_system(p, t[level_triangles[end_level]], end_level, num_nodes_up_to_level)
     A_sparse = csc_matrix(A)
     u = spsolve(A_sparse, b)
-    plot_solution('', 'a', p, t[level_triangles[end_level]], u)
+    title = '-(u_xx + u_yy) = 1 :: Adapted Mesh'
+    plot_solution(title, 'a', p, t[level_triangles[end_level]], u)
     plt.show()
 
 
 if __name__ == "__main__":
     run_multigrid_2D_experiments()
-    # run_adaptive_2D_experiments()
+    run_adaptive_2D_experiments()
 
 
